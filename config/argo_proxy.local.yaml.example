@@ -1,0 +1,11 @@
+# Example — copy to config/argo_proxy.local.yaml (gitignored) or run setup script.
+#
+#   bash scripts/setup_argo_proxy.sh -u YOUR_ANL_USER -m gpt-4o --jump node-V010
+
+argo_proxy:
+  enabled: true
+  username: YOUR_ANL_USERNAME
+  ssh_jump_host: node-V010
+  model: gpt-4o
+  port: 44497
+  ssh_local_port: 44497

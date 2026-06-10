@@ -1,0 +1,12 @@
+{
+  "pan_min": 908,
+  "pan_max": 0,
+  "pan_range": -908,
+  "pan_degrees": 355.0,
+  "pan_units_per_degree": -2.5577464788732396,
+  "tilt_min": 0,
+  "tilt_max": 112,
+  "tilt_range": 112,
+  "tilt_degrees": 50.0,
+  "tilt_units_per_degree": 2.24
+}

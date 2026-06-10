@@ -1,0 +1,14 @@
+[project]
+name = "jetson-ptz-agent-graph"
+version = "0.1.0"
+description = "LangGraph orchestration layer with PTZ/sim camera sensor gateway"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ptz_node*"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

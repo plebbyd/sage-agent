@@ -1,0 +1,12 @@
+# Vision backends for PTZ detect/caption (Mac local + Jetson edge).
+# Installed automatically by scripts/local_dev.sh (skip with INSTALL_VISION=0).
+
+ultralytics>=8.3.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+# BioCLIP 2 (hf-hub:imageomics/bioclip-2, ViT-L/14) needs a recent OpenCLIP.
+open_clip_torch>=2.24.0
+torch>=2.0.0
+torchvision>=0.15.0
+huggingface_hub>=0.23.0
+requests>=2.31.0

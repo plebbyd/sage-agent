@@ -1,0 +1,47 @@
+# SSH config snippets for argo-proxy two-node setup (Mac → node-V010 → ARGO API).
+#
+# Add to ~/.ssh/config (adjust HostName/User to match your ANL/Sage access).
+#
+# --- node-V010 (ANL network — run argo-proxy serve here) -------------------
+#
+# Host node-V010
+#     HostName node-V010.sagecontinuum.org
+#     User YOUR_ANL_USERNAME
+#     IdentityFile ~/.ssh/id_ed25519
+#     ForwardAgent yes
+#     ServerAliveInterval 30
+#     ServerAliveCountMax 4
+#
+# If you reach Sage nodes via a bastion / VPN jump:
+#
+# Host sage-bastion
+#     HostName login.anl.gov
+#     User YOUR_ANL_USERNAME
+#     IdentityFile ~/.ssh/id_ed25519
+#
+# Host node-V010
+#     HostName node-V010.sagecontinuum.org
+#     User YOUR_ANL_USERNAME
+#     ProxyJump sage-bastion
+#     IdentityFile ~/.ssh/id_ed25519
+#     ForwardAgent yes
+#
+# --- Verify SSH before running setup ----------------------------------------
+#
+#   ssh node-V010 hostname
+#
+# --- On node-V010 (once): start argo-proxy on ANL network -------------------
+#
+#   cd jetson-ptz-agent-graph   # or ptz-agent
+#   bash scripts/setup_argo_proxy.sh -u YOUR_ANL_USERNAME -m gpt-4o
+#
+# --- On MacBook: tunnel to node-V010 proxy ----------------------------------
+#
+#   bash scripts/setup_argo_proxy.sh -u YOUR_ANL_USERNAME -m gpt-4o --jump node-V010
+#   bash scripts/setup_argo_proxy.sh test
+#
+# Manual tunnel (same as setup script):
+#
+#   ssh -N -L 44497:127.0.0.1:44497 node-V010
+#
+# Then agent uses OpenAI-compatible http://127.0.0.1:44497/v1 with API key = ANL username.

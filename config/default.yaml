@@ -1,0 +1,76 @@
+# PTZ-agent runtime is vendored under vendor/ptz_agent (self-contained).
+# Refresh with `bash scripts/vendor_ptz_agent.sh`. Set this (or PTZ_AGENT_ROOT)
+# only to override with an external ptz-agent checkout.
+ptz_agent_root: null
+
+gateway:
+  # The managed PTZ device id (sim or Reolink, decided inside ptz-agent).
+  default_ptz_id: ptz_primary
+  # When true, every plugin in ptz-agent/sensors/ is auto-discovered and exposed
+  # as a read-only sensor device (id "sensor:<name>") through the same gateway,
+  # so adding a weather/serial/I2C/GPIO sensor needs no changes in this repo.
+  enable_msa_sensors: true
+
+# Fallback when argo_proxy.enabled is false (see scripts/setup_argo_proxy.sh disable)
+model:
+  provider: ollama
+  model: gemma4:e2b
+  base_url: http://127.0.0.1:11434
+  temperature: 0.2
+  max_tokens: 2048
+
+agent:
+  max_iterations_hint: null
+
+# Modular skills (auto-discovered from ptz_node/skills/ + optional skills_dir).
+# Per-skill overrides live under their name, e.g. skills.self_diagnosis.enabled.
+skills: {}
+
+# Self-diagnosis / self-healing skill.
+#   mode: off | notify_only | approval | auto
+#     approval  → save a proposed fix and wait for `ptz-node heal --approve <id>`
+#     auto      → apply the LLM's fix immediately (backups kept; --revert <id>)
+#   Secrets come from env only: ANTHROPIC_API_KEY / OPENROUTER_API_KEY /
+#   OPENAI_API_KEY (healer LLM), SLACK_WEBHOOK_URL or SLACK_BOT_TOKEN+SLACK_CHANNEL,
+#   SMTP_* for email.
+self_healing:
+  enabled: false
+  mode: approval
+  swallow_errors: false
+  model:
+    # A strong API model for debugging. Empty provider → reuse the agent's LLM.
+    #   provider: anthropic   → model: claude-sonnet-4-20250514 (ANTHROPIC_API_KEY)
+    #   provider: openrouter  → model: anthropic/claude-3.7-sonnet, openai/gpt-4o,
+    #                           google/gemini-2.0-flash-001, … (OPENROUTER_API_KEY)
+    #   provider: openai      → model: gpt-4o (OPENAI_API_KEY)
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    temperature: 0.0
+    max_tokens: 4096
+    # base_url: https://openrouter.ai/api/v1   # optional override for openrouter
+  snapshot:
+    interval_hours: 12      # snapshot cadence
+    keep: 24                # max snapshots retained
+    max_total_mb: 50        # hard cap on snapshot dir size (oldest pruned first)
+    include_pip_freeze: true
+    include_file_inventory: true
+  notify:
+    channels: []            # e.g. [slack] or [slack, email]
+    slack_channel: ""       # used with SLACK_BOT_TOKEN (else set SLACK_WEBHOOK_URL)
+    email_to: []            # used with SMTP_* env vars
+
+# argo-proxy — ANL ARGO gateway (OpenAI /v1/chat/completions).
+# Install: https://argo-proxy.readthedocs.io/en/latest/usage/installation/
+# Run on ANL network: argo-proxy serve  (https://argo-proxy.readthedocs.io/en/latest/usage/running/)
+# Mac setup: bash scripts/setup_argo_proxy.sh -u USER -m gpt-4o --jump node-V010
+# Writes config/argo_proxy.local.yaml (gitignored).
+argo_proxy:
+  enabled: false
+  username: ""
+  host: 127.0.0.1
+  port: 44497
+  model: gpt-4o
+  auto_start: true
+  ssh_jump_host: ""
+  ssh_local_port: 44497
+  argo_upstream: https://apps.inside.anl.gov/argoapi

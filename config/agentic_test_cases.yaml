@@ -1,0 +1,129 @@
+# Agentic test cases for Sage-style edge nodes (Jetson / Sage Grande).
+# Run: python -m ptz_node test --list
+#      python -m ptz_node test --id ptz_multimodel_scientific_survey
+#      python -m ptz_node test --all
+#
+# Sage context: field nodes collect multimodal sensor data, process ML locally,
+# and transmit insights — wildfire, agriculture, ecosystem monitoring, urban science.
+# See https://sagecontinuum.org/docs/about/overview
+
+cases:
+  - id: ptz_multimodel_scientific_survey
+    title: PTZ multi-model scientific survey (YOLO + BioCLIP + Gemma4)
+    sage_domain: ecosystem_monitoring
+    description: >
+      Core vision stack test. Agent must aim the PTZ, run three detector backends
+      on different viewpoints, and produce a scientist-ready summary.
+    require_doctor_ok: false
+    expect_tools:
+      - sensor_list_devices
+      - detector_status
+      - ptz_get_position
+      - ptz_detect
+    expect_detectors:
+      - yolo
+    expect_keywords_in_reply:
+      - yolo
+    prompt: |
+      You are an agent on a Sage edge node with a PTZ camera. Perform a short
+      scientific viewport survey for an ecologist:
+      1) List devices and detector_status.
+      2) Read PTZ position.
+      3) Run ptz_detect with model=yolo and targets=* on the current view. Note labels and counts.
+      4) Pan +45 degrees (ptz_pan_by), then run ptz_detect with model=bioclip and
+         target_taxon=Mammalia (skip if unavailable and say so).
+      5) Pan +45 degrees again, then run ptz_detect with model=gemma4 and targets=* 
+         OR use ptz_caption with model=gemma4 describing habitat structure.
+      6) Summarize findings across models: objects, candidate taxa, scene semantics,
+         and which model was best for each question. Mention uncertainty.
+
+  - id: wildfire_smoke_patrol
+    title: Wildfire / smoke early patrol (PTZ + YOLO + Gemma4 scene check)
+    sage_domain: fire_science
+    description: >
+      Sage nodes support wildfire detection workflows. Agent scans two headings for
+      smoke-like objects and semantic fire-risk cues.
+    require_doctor_ok: false
+    expect_tools:
+      - ptz_detect
+      - ptz_get_position
+    expect_detectors:
+      - yolo
+    expect_keywords_in_reply:
+      - smoke
+    prompt: |
+      Wildfire patrol on a Sage edge PTZ node. Goal: screen for smoke or fire-related
+      indicators in the current landscape.
+      1) detector_status and ptz_get_position.
+      2) ptz_detect model=yolo targets=smoke,fire on current view (use * if no hits).
+      3) ptz_pan_by 90 degrees; repeat YOLO with targets=*.
+      4) ptz_detect model=gemma4 target="smoke, haze, wildfire, burn scar" OR
+         ptz_caption model=gemma4 prompt="Describe fire or smoke risk cues in this scene."
+      5) Report patrol summary: headings checked, detections, recommended follow-up
+         (e.g., alert human operator, schedule rescan). Be explicit if nothing found.
+
+  - id: aves_biodiversity_scan
+    title: Aves / biodiversity scan (BioCLIP taxon filter)
+    sage_domain: biodiversity
+    description: >
+      Species-oriented survey using BioCLIP lineage filtering — common Sage ecology use case.
+    require_doctor_ok: false
+    expect_tools:
+      - ptz_detect
+    expect_detectors:
+      - bioclip
+    expect_keywords_in_reply:
+      - bioclip
+    prompt: |
+      Biodiversity quick-scan for birds (class Aves) using the PTZ gateway only.
+      1) sensor_list_devices, detector_status.
+      2) At current position run ptz_detect model=bioclip target_taxon=Aves.
+      3) ptz_pan_by 60; repeat BioCLIP Aves.
+      4) Compare both views: list candidate species labels and confidence if present.
+      5) Recommend next pan/tilt for a fuller transect. Do not invent detections —
+         only report tool JSON.
+
+  - id: land_cover_agriculture_scene
+    title: Land cover / agriculture scene understanding (Gemma4 caption + PTZ)
+    sage_domain: precision_agriculture
+    description: >
+      Semantic land-cover interpretation aligned with Sage agriculture and drought workflows.
+    require_doctor_ok: false
+    expect_tools:
+      - ptz_caption
+    expect_detectors:
+      - gemma4
+    expect_keywords_in_reply:
+      - caption
+    prompt: |
+      Precision agriculture reconnaissance on a Sage node PTZ camera.
+      1) ptz_get_position and ptz_take_snapshot.
+      2) ptz_caption model=gemma4 prompt="Describe crop vs bare soil, irrigation cues,
+         vegetation stress, and nearby water or infrastructure."
+      3) ptz_pan_by 45; repeat caption with same prompt.
+      4) Deliver a brief land-cover assessment comparing the two viewpoints and
+         suggest what ground-truth sensors (soil moisture, weather) would validate it.
+
+  - id: edge_gateway_preflight
+    title: Edge gateway preflight + multi-sensor census (no LLM vision required)
+    sage_domain: platform_ops
+    description: >
+      Validates the sensor-management layer end-to-end: device catalog (camera +
+      auto-discovered sensors), PTZ state, and a generic sensor read. Mirrors a Sage
+      node "process locally before transmit" readiness check and proves the gateway
+      handles arbitrary sensor types, not just the PTZ camera.
+    require_doctor_ok: false
+    expect_tools:
+      - sensor_list_devices
+      - ptz_get_position
+    expect_keywords_in_reply:
+      - ptz
+    prompt: |
+      Platform preflight for a Sage edge deployment. Without moving the camera far:
+      1) sensor_list_devices — report each device id, kind, interface, backend, capabilities.
+      2) For every device with kind=sensor, call sensor_read to capture one reading.
+      3) detector_status — which vision models are available on this node.
+      4) ptz_get_position — pan, tilt, FOV.
+      5) ptz_take_snapshot with a filename preflight_snapshot.jpg if supported.
+      6) Output a JSON-ready readiness block: gateway_ok, ptz_backend, sensor_count,
+         sensor_readings, detectors, snapshot_path.

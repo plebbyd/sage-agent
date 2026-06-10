@@ -1,0 +1,54 @@
+# DGX Spark deployment — OpenRouter agent LLM, simulated PTZ, Gemma4 vision via Ollama.
+#
+# Use:  export PTZ_GRAPH_CONFIG=$PWD/config/dgx_spark.yaml
+#       export OPENROUTER_API_KEY=sk-or-...      # agent + healer LLM
+#       export MSA_PTZ_BACKEND=sim               # simulated PTZ (needs ptz-agent/stitched.png)
+#       ollama serve &  &&  ollama pull gemma3   # only needed for ptz_detect/caption model=gemma4
+#
+# Self-contained: the ptz-agent runtime is vendored under vendor/ptz_agent
+# (refresh with `bash scripts/vendor_ptz_agent.sh`). Set ptz_agent_root /
+# PTZ_AGENT_ROOT only to override with a live external checkout.
+
+ptz_agent_root: null
+
+gateway:
+  default_ptz_id: ptz_primary
+  enable_msa_sensors: true        # auto-discover ptz-agent/sensors/* (system_stats, …)
+
+# Agent reasoning LLM = OpenRouter (OpenAI-compatible). Pick any slug from
+# https://openrouter.ai/models — must support tool/function calling.
+model:
+  provider: openrouter
+  model: anthropic/claude-3.7-sonnet   # or openai/gpt-4o, google/gemini-2.0-flash-001
+  temperature: 0.2
+  max_tokens: 2048
+  # base_url: https://openrouter.ai/api/v1   # default; override only if proxying
+
+agent:
+  max_iterations_hint: 64
+
+# Gemma4 image detect/caption runs through ptz-agent's detectors against local
+# Ollama (OLLAMA_HOST, default 127.0.0.1:11434). YOLO/BioCLIP stay off until
+# GPU PyTorch is installed — detector_status will show what's available.
+
+# Self-healing: same OpenRouter key. Starts disabled + approval-mode (safe).
+# Flip enabled: true once you've watched a couple of proposals.
+self_healing:
+  enabled: false
+  mode: approval                  # off | notify_only | approval | auto
+  swallow_errors: false
+  model:
+    provider: openrouter
+    model: anthropic/claude-3.7-sonnet   # a strong debugger; can differ from agent model
+    temperature: 0.0
+    max_tokens: 4096
+  snapshot:
+    interval_hours: 12
+    keep: 24
+    max_total_mb: 50
+  notify:
+    channels: []                  # e.g. [slack]  (set SLACK_WEBHOOK_URL)
+
+# OpenRouter replaces argo-proxy here; keep it off.
+argo_proxy:
+  enabled: false

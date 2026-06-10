@@ -1,0 +1,23 @@
+# Default config for jetson-ptz-agent-graph (copy or override with PTZ_GRAPH_CONFIG).
+
+# Absolute path to the MSA-main/ptz-agent checkout. If unset the loader looks for
+# a sibling directory ../../ptz-agent relative to this file's repo root when
+# co-located under MSA-main.
+ptz_agent_root: null
+
+gateway:
+  # Logical device IDs for this iteration — one managed PTZ (sim or Reolink via ptz-agent)
+  default_ptz_id: ptz_primary
+
+model:
+  provider: ollama          # ollama | anthropic | openai | argo_proxy
+  model: llama3.2
+  # Ollama
+  base_url: http://127.0.0.1:11434
+  # Anthropic — use env ANTHROPIC_API_KEY
+  # api_key: null
+  # OpenAI / vLLM
+  # openai_base_url: https://api.openai.com/v1
+
+agent:
+  max_iterations_hint: null   # bounded by LangGraph recursion_limit in CLI/API

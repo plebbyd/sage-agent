@@ -1,0 +1,4 @@
+# ANL argo-proxy — OpenAI-compatible gateway to ARGO API.
+# Install: https://argo-proxy.readthedocs.io/en/latest/usage/installation/
+# Run on ANL network node: argo-proxy serve
+argo-proxy>=3.0.0

@@ -1,0 +1,65 @@
+# MacBook local development — simulated PTZ + argo-proxy (via node-V010 SSH tunnel).
+# Ollama remains available: bash scripts/setup_argo_proxy.sh disable
+#
+# Use: export PTZ_GRAPH_CONFIG=config/local.yaml
+
+ptz_agent_root: null
+
+gateway:
+  default_ptz_id: ptz_primary
+  # Auto-discover ptz-agent/sensors/* plugins as read-only sensor devices
+  # (system_stats today; weather/serial/USB/I2C/GPIO as users add them).
+  enable_msa_sensors: true
+
+# Used when argo_proxy.enabled is false (see scripts/setup_argo_proxy.sh disable)
+model:
+  provider: ollama
+  model: gemma4:e2b
+  base_url: http://127.0.0.1:11434
+  temperature: 0.2
+  max_tokens: 2048
+
+agent:
+  max_iterations_hint: 64
+
+# Self-healing on the Mac: snapshot every 6h, propose fixes for approval, ping Slack.
+# Enable by setting a healer API key and SLACK_WEBHOOK_URL (notify), then flip
+# enabled: true. Switch mode to "auto" only once you trust it.
+#   anthropic  → export ANTHROPIC_API_KEY=...
+#   openrouter → export OPENROUTER_API_KEY=...  (then pick any model slug below)
+self_healing:
+  enabled: false
+  mode: approval
+  swallow_errors: false
+  model:
+    # Default: Anthropic. To use OpenRouter instead, switch provider/model:
+    #   provider: openrouter
+    #   model: anthropic/claude-3.7-sonnet   # or openai/gpt-4o, google/gemini-2.0-flash-001
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    temperature: 0.0
+    max_tokens: 4096
+  snapshot:
+    interval_hours: 6
+    keep: 24
+    max_total_mb: 30
+  notify:
+    channels: [slack]
+
+local:
+  ptz_backend: sim
+  debug_dir: .local
+
+# Agent LLM: argo-proxy on node-V010, tunneled to localhost:44497 on this Mac.
+# One-time: bash scripts/setup_argo_proxy.sh -u YOUR_ANL_USER -m gpt-4o --jump node-V010
+# Username is written to config/argo_proxy.local.yaml (gitignored).
+argo_proxy:
+  enabled: true
+  username: ""
+  host: 127.0.0.1
+  port: 44497
+  model: gpt-4o
+  auto_start: false
+  ssh_jump_host: node-V010
+  ssh_local_port: 44497
+  argo_upstream: https://apps.inside.anl.gov/argoapi
