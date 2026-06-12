@@ -46,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="print full result dict JSON instead of final reply")
     r.add_argument("--no-trace", action="store_true",
                    help="skip writing .local/runs trace artifacts")
+    r.add_argument("--quiet", action="store_true",
+                   help="suppress live per-step progress on stderr")
 
     d = sub.add_parser("devices", help="print managed device catalog (all drivers)")
     d.add_argument("--config", type=Path, default=None)
@@ -330,10 +332,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         t0 = time.time()
         try:
-            out = graph.invoke(
+            out = None
+            seen = 0
+            # Stream state values so long runs show a live heartbeat instead of
+            # appearing hung while models download/load or tools grind.
+            for state in graph.stream(
                 {"messages": [HumanMessage(content=prompt)]},
                 config={"recursion_limit": int(args.limit)},
-            )
+                stream_mode="values",
+            ):
+                out = state
+                if not args.quiet:
+                    seen = _print_new_steps(out.get("messages") or [], seen, t0)
+            if out is None:
+                raise RuntimeError("agent produced no output")
             duration = time.time() - t0
             if not args.no_trace:
                 rec.finish_success(out.get("messages") or [], duration_s=duration)
@@ -379,6 +391,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return 1
+
+
+def _print_new_steps(messages: list, seen: int, t0: float) -> int:
+    """Print tool calls/results that appeared since the last stream chunk."""
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    for m in (messages or [])[seen:]:
+        elapsed = f"{time.time() - t0:5.0f}s"
+        if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
+            for tc in m.tool_calls:
+                arg_str = json.dumps(tc.get("args") or {}, default=str)
+                if len(arg_str) > 140:
+                    arg_str = arg_str[:140] + "…"
+                print(f"[{elapsed}] → {tc.get('name')} {arg_str}",
+                      file=sys.stderr, flush=True)
+        elif isinstance(m, ToolMessage):
+            content = str(m.content)
+            mark = "✗" if '"ok": false' in content.lower() else "✓"
+            print(f"[{elapsed}] {mark} {getattr(m, 'name', 'tool')} "
+                  f"({len(content)} chars)", file=sys.stderr, flush=True)
+    return len(messages or [])
 
 
 def _maybe_snapshot(cfg) -> None:
