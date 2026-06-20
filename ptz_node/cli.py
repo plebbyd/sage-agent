@@ -311,6 +311,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "run":
         prompt_parts = list(args.prompt)
+        # `prompt` is argparse.REMAINDER, so it greedily swallows everything after
+        # the first prompt token — including options like `--config`/`--limit` if
+        # they are placed AFTER the prompt. That silently dropped a `--config`
+        # override during node testing. Catch it and tell the user to reorder.
+        _run_flags = {"--config", "--limit", "--json-out", "--no-trace", "--quiet"}
+        misplaced = sorted(_run_flags.intersection(prompt_parts))
+        if misplaced:
+            print(
+                f"option(s) {', '.join(misplaced)} were captured as prompt text — "
+                "put run options BEFORE the prompt, e.g.\n"
+                '  ptz-node run --config config/x.yaml --limit 12 "your task"',
+                file=sys.stderr,
+            )
+            return 2
         prompt = (
             (" ".join(prompt_parts).strip())
             if prompt_parts

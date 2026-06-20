@@ -67,10 +67,15 @@ def _det_summary(res: dict[str, Any], top: int = 12) -> dict[str, Any]:
 
 def _cap_summary(res: dict[str, Any], max_chars: int = 700) -> dict[str, Any]:
     r = res.get("result") or {}
-    out: dict[str, Any] = {"caption": str(r.get("caption", ""))[:max_chars]}
+    caption = str(r.get("caption", ""))[:max_chars]
+    out: dict[str, Any] = {"caption": caption}
     err = r.get("error") or res.get("error")
     if err or not res.get("ok", True):
         out["error"] = str(err or "gateway call failed")
+    elif not caption.strip():
+        # Empty caption with no error = the vision model returned no text (e.g. a
+        # tiny gemma4 tag). Flag it so it doesn't read as a silent blank success.
+        out["note"] = "model returned an empty caption (check the gemma4 vision tag)"
     return out
 
 

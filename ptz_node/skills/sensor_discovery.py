@@ -44,9 +44,43 @@ _PORT_HINTS: dict[int, str] = {
 _VENDOR_OUI = {
     "ec:71:db": "Reolink", "9c:8e:cd": "Reolink",
     "00:1a:07": "Costar", "00:0f:7c": "ACTi", "00:18:ae": "Hikvision",
-    "00:12:12": "Axis", "00:40:8c": "Axis", "bc:ad:28": "Hikvision",
-    "44:19:b6": "Hikvision", "e0:50:8b": "Dahua", "3c:ef:8c": "Dahua",
+    "00:12:12": "Axis", "00:40:8c": "Axis", "ac:cc:8e": "Axis",
+    "bc:ad:28": "Hikvision", "44:19:b6": "Hikvision",
+    "e0:50:8b": "Dahua", "3c:ef:8c": "Dahua",
+    "00:09:18": "Hanwha", "00:16:6c": "Hanwha", "e4:30:22": "Hanwha",
+    "00:03:c5": "Mobotix",
 }
+
+# Vendor fingerprints found in HTTP banners / landing pages. MAC OUI is often
+# unavailable across an L3 hop (no ARP entry), so the banner is the primary
+# signal in practice — see node-dev deployment where the AXIS camera had no MAC.
+_VENDOR_BANNER = (
+    ("axis", "Axis"),
+    ("hanwha", "Hanwha"), ("wisenet", "Hanwha"), ("samsung techwin", "Hanwha"),
+    ("mobotix", "Mobotix"),
+    ("hikvision", "Hikvision"), ("dahua", "Dahua"),
+    ("reolink", "Reolink"), ("bosch", "Bosch"),
+    ("vivotek", "Vivotek"), ("amcrest", "Amcrest"),
+)
+
+# Correct main-stream RTSP path per vendor (USER/PASS/IP filled in by configure).
+# These differ per vendor — emitting the Reolink path for an Axis camera is wrong.
+_RTSP_TEMPLATES = {
+    "axis": "rtsp://{user}:{pw}@{ip}:554/axis-media/media.amp",
+    "hanwha": "rtsp://{user}:{pw}@{ip}:554/profile1/media.smp",
+    "mobotix": "rtsp://{user}:{pw}@{ip}:554/mobotix.mjpeg",
+    "hikvision": "rtsp://{user}:{pw}@{ip}:554/Streaming/Channels/101",
+    "dahua": "rtsp://{user}:{pw}@{ip}:554/cam/realmonitor?channel=1&subtype=0",
+    "amcrest": "rtsp://{user}:{pw}@{ip}:554/cam/realmonitor?channel=1&subtype=0",
+    "reolink": "rtsp://{user}:{pw}@{ip}:554/h264Preview_01_main",
+    "bosch": "rtsp://{user}:{pw}@{ip}:554/rtsp_tunnel",
+    "vivotek": "rtsp://{user}:{pw}@{ip}:554/live.sdp",
+    "_default": "rtsp://{user}:{pw}@{ip}:554/  (vendor-specific — check ONVIF GetStreamUri)",
+}
+
+# Vendors the gateway can actually DRIVE (PTZ control) today. Everything else is
+# discoverable + viewable over RTSP, but has no control driver yet (ONVIF TODO).
+_DRIVABLE_BACKENDS = {"reolink"}
 _PTZ_DEFAULT_PORTS = {554, 8000, 80}
 
 
@@ -186,16 +220,19 @@ class SensorDiscoverySkill(BaseSkill):
         _progress(f"identifying {ip}")
         ports = self._scan_ports(ip, timeout=1.0)
         mac = self._arp_table().get(ip, "")
+        banner = self._http_banner(ip) if (80 in ports or 8000 in ports) else ""
+        # Prefer MAC OUI when present; otherwise (the common L3 case) read the
+        # vendor straight out of the HTTP banner / landing page.
+        vendor = self._vendor_from_mac(mac) or self._vendor_from_banner(banner)
         info: dict[str, Any] = {
-            "ip": ip, "mac": mac, "vendor": self._vendor_from_mac(mac),
+            "ip": ip, "mac": mac, "vendor": vendor,
             "hostname": self._reverse_dns(ip), "open_ports": ports,
-            "http_banner": self._http_banner(ip) if (80 in ports or 8000 in ports) else "",
+            "http_banner": banner,
+            "model": self._model_from_banner(banner),
             "rtsp": 554 in ports or 8554 in ports,
             "onvif": 2020 in ports or 9000 in ports,
         }
         info["likely_camera"] = self._looks_like_camera(info)
-        if not info["vendor"] and "reolink" in info["http_banner"].lower():
-            info["vendor"] = "Reolink"
         reachable = bool(ports)
         return SkillResult(
             ok=reachable, skill=self.name,
@@ -218,57 +255,91 @@ class SensorDiscoverySkill(BaseSkill):
                                data={"needs_user_input": [
                                    {"field": "ip", "prompt": "Which camera IP?",
                                     "secret": False}]})
-        backend = str(ctx.args.get("backend", "auto")).lower()
+        requested_backend = str(ctx.args.get("backend", "auto")).lower()
         username = str(ctx.args.get("username", "admin"))
         ident = self._identify(SkillContext(config=ctx.config, args={"ip": ip}))
-        vendor = (ident.data.get("vendor") or "").lower()
-        if backend == "auto":
-            backend = "reolink" if ("reolink" in vendor or ident.data.get("onvif")
-                                    or ident.data.get("rtsp")) else "reolink"
+        vendor_name = (ident.data.get("vendor") or "")
+        vendor = vendor_name.lower()
 
-        # The vendored ptz-agent Reolink driver reads creds from the environment
-        # at connect time (REOLINK_IP/HOST, REOLINK_USER, REOLINK_PASSWORD) and is
-        # selected via MSA_PTZ_BACKEND=reolink. We emit those exact steps and defer
-        # the password (a human secret) to the user.
-        env_steps = {
-            "MSA_PTZ_BACKEND": "reolink",
-            "REOLINK_IP": ip,
-            "REOLINK_USER": username,
-            "REOLINK_PASSWORD": "<ASK_USER>",
-        }
-        shell = "\n".join(f"export {k}={v}" for k, v in env_steps.items())
+        # Pick a control backend from the detected vendor. Only vendors in
+        # _DRIVABLE_BACKENDS have a real PTZ-control driver today; the rest are
+        # discoverable + viewable over RTSP but NOT controllable until an ONVIF /
+        # vendor driver lands. Be honest about that instead of pretending Reolink.
+        if requested_backend not in ("auto", ""):
+            backend = requested_backend
+        elif "reolink" in vendor:
+            backend = "reolink"
+        else:
+            backend = "onvif"  # placeholder kind: discoverable, not yet drivable
+
+        drivable = backend in _DRIVABLE_BACKENDS
+        rtsp_url = _RTSP_TEMPLATES.get(vendor, _RTSP_TEMPLATES["_default"]).format(
+            user=username or "USER", pw="PASSWORD", ip=ip)
+
         needs = [{
-            "field": "REOLINK_PASSWORD",
+            "field": "CAMERA_PASSWORD",
             "prompt": f"Enter the password for camera {ip} (user '{username}'). "
-                      "I will not store it; set it as the REOLINK_PASSWORD env var.",
+                      "I will not store it; pass it via env var, not YAML/logs.",
             "secret": True,
         }]
         if username == "admin":
             needs.append({
-                "field": "REOLINK_USER",
+                "field": "CAMERA_USER",
                 "prompt": "Confirm the camera username (default 'admin' assumed).",
                 "secret": False, "default": "admin"})
 
-        verify = [
-            "source the env vars above (REOLINK_PASSWORD must be set)",
-            "python -m ptz_node devices        # ptz_primary should show backend=reolink",
-            "python -m ptz_node invoke ptz_primary get_position",
-            "python -m ptz_node skill run sensor_discovery "
-            "--args '{\"action\":\"identify\",\"ip\":\"" + ip + "\"}'",
-        ]
+        if drivable:
+            # ptz-agent Reolink driver: creds from env at connect time, selected
+            # via MSA_PTZ_BACKEND=reolink.
+            env_steps = {
+                "MSA_PTZ_BACKEND": "reolink",
+                "REOLINK_IP": ip,
+                "REOLINK_USER": username,
+                "REOLINK_PASSWORD": "<ASK_USER>",
+            }
+            shell = "\n".join(f"export {k}={v}" for k, v in env_steps.items())
+            verify = [
+                "source the env vars above (REOLINK_PASSWORD must be set)",
+                "python -m ptz_node devices        # ptz_primary should show backend=reolink",
+                "python -m ptz_node invoke ptz_primary get_position",
+            ]
+            notes = ("Reolink creds are read from the environment at connect time — "
+                     "never commit the password. Live RTSP: " + rtsp_url)
+            summary = (f"configuration plan for {ip} "
+                       f"(vendor={vendor_name or 'unknown'}, backend=reolink — drivable); "
+                       f"{len(needs)} item(s) need the user (password required)")
+        else:
+            # No control driver for this vendor yet. Don't emit Reolink env that
+            # would silently fail to drive an Axis/Hanwha/Mobotix PTZ.
+            env_steps = {}
+            shell = ""
+            verify = [
+                "Viewing only (no PTZ control driver yet for this vendor):",
+                f"ffplay '{rtsp_url}'   # replace PASSWORD; confirm the stream",
+                "To control PTZ, a generic ONVIF driver is needed — see "
+                "ptz_node/sensor_gateway/drivers/ (TODO: onvif_camera.py).",
+            ]
+            notes = (
+                f"'{vendor_name or 'this vendor'}' has NO PTZ-control driver in the "
+                "gateway yet — only sim + Reolink are drivable. The camera is reachable "
+                "and viewable over RTSP at the URL below, but move_to/snapshot via the "
+                "gateway will not work until an ONVIF (or vendor-specific) driver is added. "
+                "Live RTSP: " + rtsp_url)
+
         return SkillResult(
             ok=True, skill=self.name,
-            summary=(f"configuration plan for {ip} (backend={backend}); "
-                     f"{len(needs)} item(s) need the user (password is required)"),
+            summary=summary if drivable else (
+                f"{ip} identified as {vendor_name or 'unknown vendor'} — reachable but "
+                f"NOT drivable yet (no {vendor or 'onvif'} control driver); RTSP viewing only"),
             data={
-                "ip": ip, "backend": backend, "vendor": ident.data.get("vendor"),
+                "ip": ip, "backend": backend, "vendor": vendor_name,
+                "model": ident.data.get("model", ""),
+                "drivable": drivable,
+                "rtsp_url": rtsp_url,
                 "env_exports": env_steps,
                 "shell": shell,
                 "verify_steps": verify,
-                "notes": ("Reolink creds are read from the environment at connect "
-                          "time — never commit the password; use env vars or a secrets "
-                          "manager. RTSP stream: rtsp://USER:PASS@%s:554/h264Preview_01_main"
-                          % ip),
+                "notes": notes,
                 "needs_user_input": needs,
             },
         )
@@ -383,10 +454,36 @@ class SensorDiscoverySkill(BaseSkill):
             return ""
         return _VENDOR_OUI.get(mac.lower()[:8], "")
 
+    def _vendor_from_banner(self, banner: str) -> str:
+        """Read a camera vendor out of an HTTP banner / landing page body.
+
+        Across an L3 hop there is usually no ARP/MAC entry, so the banner is the
+        only vendor signal — an Axis camera literally serves ``Axis Communications``
+        and ``<title>AXIS</title>``. Without this, identify reports 'unknown'.
+        """
+        if not banner:
+            return ""
+        low = banner.lower()
+        for needle, name in _VENDOR_BANNER:
+            if needle in low:
+                return name
+        return ""
+
+    _MODEL_RE = re.compile(
+        r"\b((?:Q\d{4}|XN[PV]-\d{4,}|M\d{2}|DS-[A-Z0-9-]+)[A-Z0-9-]*)\b")
+
+    def _model_from_banner(self, banner: str) -> str:
+        """Best-effort model token (Axis Q6055, Hanwha XNP-6400RW, Mobotix M16…)."""
+        if not banner:
+            return ""
+        m = self._MODEL_RE.search(banner)
+        return m.group(1) if m else ""
+
     def _looks_like_camera(self, entry: dict[str, Any]) -> bool:
         ports = set(entry.get("open_ports") or [])
         vendor = (entry.get("vendor") or "").lower()
-        if any(v in vendor for v in ("reolink", "hikvision", "dahua", "axis", "acti")):
+        if any(v in vendor for v in ("reolink", "hikvision", "dahua", "axis", "acti",
+                                     "hanwha", "mobotix", "bosch", "vivotek", "amcrest")):
             return True
         if "onvif" in (entry.get("sources") or []):
             return True

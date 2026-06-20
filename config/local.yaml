@@ -11,13 +11,19 @@ gateway:
   # (system_stats today; weather/serial/USB/I2C/GPIO as users add them).
   enable_msa_sensors: true
 
-# Used when argo_proxy.enabled is false (see scripts/setup_argo_proxy.sh disable)
+# Local reasoning LLM (active when argo_proxy.enabled is false —
+# see scripts/setup_argo_proxy.sh disable).
 model:
   provider: ollama
-  model: gemma4:e2b
+  model: gemma4:31b
   base_url: http://127.0.0.1:11434
   temperature: 0.2
   max_tokens: 2048
+
+# Local vision model for ptz_detect/ptz_caption model=gemma4 (Ollama).
+# Exported to GEMMA4_OLLAMA_MODEL at startup; an explicit env var still wins.
+vision:
+  gemma4_model: gemma4:e2b
 
 agent:
   max_iterations_hint: 64
@@ -54,7 +60,7 @@ local:
 # One-time: bash scripts/setup_argo_proxy.sh -u YOUR_ANL_USER -m gpt-4o --jump node-V010
 # Username is written to config/argo_proxy.local.yaml (gitignored).
 argo_proxy:
-  enabled: true
+  enabled: false   # local-first: agent uses Ollama gemma4:31b. Flip true to route via argo-proxy.
   username: ""
   host: 127.0.0.1
   port: 44497

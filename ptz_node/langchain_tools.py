@@ -21,6 +21,30 @@ if TYPE_CHECKING:
     from ptz_node.sensor_gateway import SensorGateway
 
 
+def _as_args_dict(value: object) -> dict:
+    """Coerce a tool's JSON-object argument from whatever the model produced.
+
+    Models routinely pass these as a real JSON **object** (``{"name": "x"}``)
+    rather than a JSON **string** (``'{"name": "x"}'``). If the parameter is typed
+    ``str``, pydantic rejects the object with "Input should be a valid string"
+    *before* the function runs, and weaker models loop forever retrying the same
+    shape. Accepting both — dict or JSON string — removes that failure mode.
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return {}
+        obj = json.loads(s)
+        if not isinstance(obj, dict):
+            raise ValueError("must be a JSON object")
+        return obj
+    raise ValueError("must be a JSON object or a JSON-object string")
+
+
 def _has_ptz(gateway: SensorGateway) -> bool:
     try:
         return any(d.get("kind") == "ptz_camera" for d in gateway.list_devices())
@@ -48,17 +72,16 @@ def build_gateway_tools(gateway: SensorGateway) -> list:
 
     @tool
     def sensor_invoke(device_id: str, capability: str,
-                      params_json: str = "{}") -> str:
+                      params_json: str | dict = "{}") -> str:
         """Invoke any device capability.
 
         device_id: from sensor_list_devices
         capability: from sensor_capabilities
-        params_json: JSON object of arguments, e.g. '{"pan": 30, "tilt": 0}'
+        params_json: arguments as a JSON object, e.g. {"pan": 30, "tilt": 0}
+                     (a JSON string of the same is also accepted)
         """
         try:
-            params = json.loads(params_json) if params_json.strip() else {}
-            if not isinstance(params, dict):
-                raise ValueError("params_json must be a JSON object")
+            params = _as_args_dict(params_json)
         except Exception as exc:
             return json.dumps({"ok": False, "error": f"bad params_json: {exc}"})
         return gateway.invoke(device_id, capability, params)
@@ -78,11 +101,18 @@ def build_gateway_tools(gateway: SensorGateway) -> list:
             return json.dumps({"error": str(exc)})
 
     @tool
-    def run_skill(name: str, args_json: str = "{}") -> str:
-        """Run an agent-callable skill once. args_json is a JSON object of arguments.
+    def run_skill(name: str, args_json: str | dict = "{}") -> str:
+        """Run an agent-callable skill once.
 
-        Example: run_skill("self_diagnosis", '{"action": "status"}')
+        name: the skill id, e.g. "demo" or "sensor_discovery".
+        args_json: the skill's arguments as a JSON object, e.g.
+                   {"name": "panorama_scan"} (a JSON string is also accepted).
+        Example: run_skill("demo", {"name": "panorama_scan"})
         """
+        try:
+            params = _as_args_dict(args_json)
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": f"bad args_json: {exc}"})
         try:
             from ptz_node.skills import SkillRegistry
 
@@ -93,7 +123,6 @@ def build_gateway_tools(gateway: SensorGateway) -> list:
             if not reg.get(name).agent_callable:
                 return json.dumps({"ok": False,
                                    "error": f"skill {name!r} is not agent-callable"})
-            params = json.loads(args_json) if args_json.strip() else {}
             return json.dumps(reg.run(name, params).as_dict(), indent=2, default=str)
         except Exception as exc:
             return json.dumps({"ok": False, "error": str(exc)})

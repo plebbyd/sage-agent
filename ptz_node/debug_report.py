@@ -49,6 +49,26 @@ def _http_ok(url: str, timeout: float = 3.0, api_key: str = "") -> dict[str, Any
         return {"url": url, "ok": False, "error": str(exc)}
 
 
+def _ollama_models(tags_url: str, timeout: float = 4.0) -> list[str]:
+    """Return the list of model names installed in Ollama (``/api/tags``)."""
+    try:
+        with urllib.request.urlopen(tags_url, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return sorted(m.get("name", "") for m in data.get("models", []) if m.get("name"))
+    except Exception:
+        return []
+
+
+def _model_present(want: str, installed: list[str]) -> bool:
+    """True if the configured model is pulled. Ollama defaults a bare name to
+    ``:latest``, so ``gemma4`` matches an installed ``gemma4:latest``."""
+    if not want:
+        return False
+    want_full = want if ":" in want else f"{want}:latest"
+    names = set(installed)
+    return want in names or want_full in names
+
+
 @dataclass
 class RunRecorder:
     prompt: str
@@ -191,8 +211,8 @@ def _probe_detector_details() -> dict[str, dict[str, Any]]:
             "error": probe.get("error", "Ollama not reachable"),
             "fix": (
                 "Start Ollama (macOS: open Ollama app, or `ollama serve`), then "
-                "`ollama pull gemma4:e2b` for the agent and `ollama pull gemma4:31b` "
-                "for vision detect/caption."
+                "`ollama pull gemma4:31b` for the agent (local reasoning) and "
+                "`ollama pull gemma4:e2b` for vision detect/caption."
             ),
         }
 
@@ -292,8 +312,25 @@ def run_doctor(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
         if not probe["ok"]:
             report["issues"].append(
                 "Agent LLM needs Ollama: open the Ollama app (macOS) or run `ollama serve`, "
-                "then `ollama pull gemma4:e2b`."
+                "then `ollama pull gemma4:31b`."
             )
+        else:
+            # Reachable is not enough — the configured model must actually be pulled,
+            # else the first `run` dies with a 404 (seen on a fresh Orin node).
+            want = str(model_cfg.get("model") or "").strip()
+            installed = _ollama_models(f"{base}/api/tags")
+            present = _model_present(want, installed)
+            extra = {"model": want, "installed": installed[:20]}
+            if present:
+                extra["detail"] = f"{want} present in ollama"
+            else:
+                extra["fix"] = f"ollama pull {want}" if want else "set model.model in config"
+            add("ollama_model_pulled", present, critical="agent", **extra)
+            if not present:
+                report["issues"].append(
+                    f"Configured Ollama model {want!r} is not pulled "
+                    f"(have: {installed or 'none'}). Run: ollama pull {want}"
+                )
     elif provider == "argo_proxy":
         base_v1 = (model_cfg.get("base_url") or "").rstrip("/")
         base = base_v1[:-3] if base_v1.endswith("/v1") else base_v1

@@ -16,6 +16,7 @@ model unchanged; structured callers use :meth:`invoke_obj` / :meth:`list_devices
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from ptz_node.sensor_gateway.base import DriverError
@@ -26,6 +27,11 @@ class SensorGateway:
     def __init__(self, cfg: dict[str, Any] | None = None, *,
                  ptz_agent_root: str | None = None) -> None:
         self._cfg = cfg or {}
+        # Publish the configured local vision model to the vendored gemma4 detector
+        # (reads GEMMA4_OLLAMA_MODEL). setdefault → an explicit env var still wins.
+        gemma4_model = (self._cfg.get("vision") or {}).get("gemma4_model")
+        if gemma4_model:
+            os.environ.setdefault("GEMMA4_OLLAMA_MODEL", str(gemma4_model))
         self._registry = DeviceRegistry(self._cfg, ptz_agent_root=ptz_agent_root)
 
     @property

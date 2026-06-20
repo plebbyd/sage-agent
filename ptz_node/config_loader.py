@@ -36,6 +36,9 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "max_tokens": 2048,
         },
         "agent": {"max_iterations_hint": None},
+        # Local vision model for ptz_detect/ptz_caption model=gemma4. Exported to
+        # GEMMA4_OLLAMA_MODEL by SensorGateway (an explicit env var still wins).
+        "vision": {"gemma4_model": "gemma4:e2b"},
         "skills": {},
         "self_healing": {
             "enabled": False,

@@ -19,10 +19,15 @@ gateway:
 # https://openrouter.ai/models — must support tool/function calling.
 model:
   provider: openrouter
-  model: anthropic/claude-3.7-sonnet   # or openai/gpt-4o, google/gemini-2.0-flash-001
+  model: anthropic/claude-opus-4.8   # or openai/gpt-4o, google/gemini-2.0-flash-001
   temperature: 0.2
   max_tokens: 2048
   # base_url: https://openrouter.ai/api/v1   # default; override only if proxying
+
+# Local vision model for ptz_detect/ptz_caption model=gemma4 (Ollama).
+# Exported to GEMMA4_OLLAMA_MODEL at startup; an explicit env var still wins.
+vision:
+  gemma4_model: gemma4:e2b
 
 agent:
   max_iterations_hint: 64

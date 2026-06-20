@@ -19,6 +19,19 @@ RSYNC_OPTS=(-az --delete --human-readable --progress)
 # Honor .gitignore (per-directory rules, including negations) and never ship .git.
 RSYNC_OPTS+=(--filter=":- .gitignore" --exclude='.git/')
 
+# PROTECT node-side runtime state from --delete. These live ONLY on the node
+# (created by bootstrap/runs), are absent from the source, and would otherwise be
+# deleted on every re-sync — forcing a full venv reinstall each deploy. `P` =
+# protect (receiver-side) and is stronger/clearer than relying on exclude rules.
+RSYNC_OPTS+=(
+    --filter='P .venv/'
+    --filter='P .micromamba/'
+    --filter='P .local/'
+    --filter='P logs/'
+    --filter='P scratchpads/'
+    --filter='P config/argo_proxy.local.yaml'
+)
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     RSYNC_OPTS+=(--dry-run --itemize-changes)
     echo "[dry-run] no files will be transferred"

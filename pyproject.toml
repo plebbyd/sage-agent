@@ -2,7 +2,10 @@
 name = "jetson-ptz-agent-graph"
 version = "0.1.0"
 description = "LangGraph orchestration layer with PTZ/sim camera sensor gateway"
-requires-python = ">=3.11"
+# Jetson AGX Orin nodes ship CPython 3.10 (Thor nodes ship 3.12). The code uses
+# `from __future__ import annotations` throughout, so 3.10 is the real floor —
+# verified running on node-dev Orin (3.10.12) and Thor (3.12.3).
+requires-python = ">=3.10"
 dependencies = []
 
 [tool.setuptools.packages.find]
